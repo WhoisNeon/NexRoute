@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            os: linux
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            os: windows
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            os: macos-arm
+          - platform: macos-13
+            target: x86_64-apple-darwin
+            os: macos-intel
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+          key: ${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Fetch sidecars
+        env:
+          TARGET: ${{ matrix.target }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run sidecars
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: NexRoute ${{ github.ref_name }}
+          releaseBody: See CHANGELOG.md for release details.
+          releaseDraft: true
+          uploadWorkflowArtifacts: true
+          uploadWorkflowArtifactsName: nexroute-${{ matrix.target }}
+          args: --target ${{ matrix.target }}
+
+      - name: Package portable Windows ZIP
+        if: matrix.os == 'windows'
+        shell: bash
+        run: |
+          DIR="src-tauri/target/${{ matrix.target }}/release"
+          7z a "nexroute-portable-${{ matrix.target }}.zip" "$DIR/nexroute.exe" "$DIR"/sing-box*.exe "$DIR"/xray*.exe "$DIR"/*.dll
+          echo "created portable zip"
+
+      - name: Package Linux tarball
+        if: matrix.os == 'linux'
+        shell: bash
+        run: |
+          DIR="src-tauri/target/${{ matrix.target }}/release"
+          tar -czf "nexroute-${{ matrix.target }}.tar.gz" -C "$DIR" nexroute sing-box-* xray-* 2>/dev/null || tar -czf "nexroute-${{ matrix.target }}.tar.gz" -C "$DIR" nexroute
+          echo "created tarball"
+
+      - name: Upload extra artifacts
+        if: (matrix.os == 'windows' || matrix.os == 'linux') && (startsWith(github.ref, 'refs/tags/') == false)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexroute-extra-${{ matrix.target }}
+          path: |
+            nexroute-portable-${{ matrix.target }}.zip
+            nexroute-${{ matrix.target }}.tar.gz
+          if-no-files-found: ignore
+
+      - name: Upload extra artifacts to release
+        if: (matrix.os == 'windows' || matrix.os == 'linux') && startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" nexroute-portable-${{ matrix.target }}.zip nexroute-${{ matrix.target }}.tar.gz --clobber 2>&1 || true
