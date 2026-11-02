@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::time::Duration;
 
 use serde::Serialize;
