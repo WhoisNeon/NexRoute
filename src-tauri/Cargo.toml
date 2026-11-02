@@ -29,6 +29,10 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 percent-encoding = "2"
 
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [profile.release]
 strip = true
 lto = true
