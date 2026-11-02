@@ -1,0 +1,19 @@
+[[permission]]
+identifier = "nexroute-commands"
+description = "Permit the NexRoute application IPC commands"
+commands.allow = [
+  "list_configs",
+  "import_uris",
+  "import_subscription",
+  "delete_configs",
+  "delete_dead",
+  "test_configs",
+  "test_all",
+  "get_settings",
+  "update_settings",
+  "start_pool",
+  "stop_pool",
+  "get_pool_status",
+  "get_core_info",
+  "get_app_info"
+]
